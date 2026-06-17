@@ -1,20 +1,23 @@
 # WhatsApp Bot
 
-Bot para WhatsApp con **Baileys** (protocolo nativo, sin Meta API, sin navegador).
+Bot para WhatsApp con **Baileys**. Sin Meta API, sin navegador.
 
-## Instalación
+## Despliegue en Railway
+
+[![Deploy on Railway](https://railway.app/button.svg)](https://railway.app/new)
+
+1. Conecta tu repo de GitHub
+2. Railway asigna un puerto automáticamente
+3. Abre la URL que te da Railway en tu navegador
+4. Escanea el QR con WhatsApp (Configuración > Dispositivos vinculados)
+
+## Uso local
 
 ```bash
 npm install
-```
-
-## Uso
-
-```bash
 npm start
+# Abre http://localhost:3000/qr
 ```
-
-Escanea el código QR con tu WhatsApp.
 
 ## Comandos
 
@@ -22,16 +25,10 @@ Escanea el código QR con tu WhatsApp.
 |---------|-------------|
 | `!ping` | pong |
 | `!help` | ayuda |
-| `!say <texto>` | repetir mensaje |
+| `!say <texto>` | repetir |
 | `!info` | info del chat |
-| `!userinfo` | estadísticas del usuario |
+| `!userinfo` | estadísticas |
 | `!welcome on/off/set` | bienvenidas (grupo) |
 | `!antispam on/off` | anti-spam (grupo) |
-| `!admin add/remove` | admins del bot (grupo) |
+| `!admin add/remove` | admins (grupo) |
 | `!schedule add/list/remove` | mensajes programados |
-
-## Despliegue
-
-Servicios gratuitos recomendados: **Railway**, **Render**, **Fly.io**, **Replit**.
-
-Solo necesitas Node.js 18+ - **no requiere Chromium ni GPU**.
