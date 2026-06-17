@@ -33,7 +33,7 @@ register('help', async (sock, msg) => {
   text += '▸ !ping | !say\n▸ !perfil | !tag | !nota | !contactos\n▸ !dato | !frase | !chiste | !consejo\n▸ !cumplido | !hora | !fecha\n▸ !8ball <preg> | !moneda | !dado <caras>\n▸ !trivia | !clima <ciudad>\n▸ !calc <expr>\n▸ !char <texto> (IA)\n▸ !olvidar (borra memoria)\n';
   if (isGroup) text += '\n▸ !welcome | !antispam | !admin\n';
   text += '\n▸ !schedule add/list/remove';
-  if (!process.env.GEMINI_API_KEY) text += '\n\n💡 Agrega GEMINI_API_KEY para respuestas con IA';
+
   await sock.sendMessage(getJid(msg), { text }, { quoted: msg });
 });
 
@@ -174,7 +174,7 @@ register('olvidar', async (sock, msg) => {
 register('char', async (sock, msg, args) => {
   const text = args.join(' ');
   if (!text) return sock.sendMessage(getJid(msg), { text: 'Uso: !char <mensaje>' }, { quoted: msg });
-  if (!process.env.GEMINI_API_KEY) return sock.sendMessage(getJid(msg), { text: '❌ No hay API key de Gemini configurada.' }, { quoted: msg });
+
   const contactId = getContactId(msg);
   const contact = getContact(contactId);
   const response = await askGemini(contactId, text, contact?.tag || '');

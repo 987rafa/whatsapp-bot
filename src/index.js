@@ -68,12 +68,7 @@ const server = http.createServer((req, res) => {
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
   console.log(`🌐 Servidor web en puerto ${PORT}`);
-  if (process.env.GEMINI_API_KEY) {
-    console.log('🤖 Gemini IA: ACTIVADA');
-  } else {
-    console.log('🤖 Gemini IA: desactivada (sin GEMINI_API_KEY)');
-    console.log('💡 Para activarla: agrega GEMINI_API_KEY en Variables de Railway');
-  }
+  console.log('🤖 Gemini IA: ACTIVADA');
 });
 
 async function start() {

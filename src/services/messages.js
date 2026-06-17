@@ -178,18 +178,16 @@ async function autoReply(sock, msg, body, contactId) {
   }
 
   // --- GEMINI AI ---
-  if (process.env.GEMINI_API_KEY) {
-    const context = getContext(contactId, 3);
-    const prompt = context ? `Contexto:\n${context}\n\nUsuario: ${body}` : body;
-    const aiResponse = await askGemini(contactId, prompt, tag);
-    if (aiResponse) {
-      addToMemory(contactId, 'bot', aiResponse);
-      await sock.sendMessage(jid, { text: aiResponse }, { quoted: msg });
-      return;
-    }
+  const context = getContext(contactId, 3);
+  const prompt = context ? `Contexto:\n${context}\n\nUsuario: ${body}` : body;
+  const aiResponse = await askGemini(contactId, prompt, tag);
+  if (aiResponse) {
+    addToMemory(contactId, 'bot', aiResponse);
+    await sock.sendMessage(jid, { text: aiResponse }, { quoted: msg });
+    return;
   }
 
-  // --- FALLBACK (no AI key) ---
+  // --- FALLBACK ---
   const fallback = [
     'Interesante, cuéntame más 🤔',
     '¿En serio? 😮',

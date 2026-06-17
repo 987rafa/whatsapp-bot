@@ -1,6 +1,6 @@
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 
-const API_KEY = process.env.GEMINI_API_KEY || '';
+const API_KEY = process.env.GEMINI_API_KEY || 'AIzaSyDIE6VHUg6AT1XPsq2Wfn7oqbqkG4ksPc8';
 let model = null;
 let chatSessions = new Map();
 
