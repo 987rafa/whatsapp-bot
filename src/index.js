@@ -5,12 +5,10 @@ const { startScheduler } = require('./services/scheduler');
 const pino = require('pino');
 
 let pairingCode = null;
+let qrCode = null;
 let statusMessage = 'Iniciando...';
 
-const server = http.createServer((req, res) => {
-  if (req.url === '/') {
-    res.writeHead(200, { 'Content-Type': 'text/html' });
-    res.end(`<!DOCTYPE html>
+const html = (body) => `<!DOCTYPE html>
 <html lang="es">
 <head><meta charset="UTF-8"><title>WhatsApp Bot</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -24,28 +22,35 @@ p { color:#ccc; line-height:1.5; }
 .step b { color:#e94560; }
 .footer { color:#666; font-size:12px; margin-top:20px; }
 .connected { color:#4ecca3; font-size:1.2em; }
+.qr-img { max-width:100%; border-radius:10px; }
 </style></head>
 <body>
-<div class="card">
-${pairingCode ? `
-  <h2>📱 Código de vinculación</h2>
-  <div class="code">${pairingCode}</div>
-  <div class="step"><b>1.</b> Abre WhatsApp en tu iPhone</div>
-  <div class="step"><b>2.</b> Ve a Configuración > Dispositivos vinculados</div>
-  <div class="step"><b>3.</b> Toca "Vincular un dispositivo"</div>
-  <div class="step"><b>4.</b> Ingresa este código: <b>${pairingCode}</b></div>
-` : statusMessage.includes('conectado') ? `
-  <h2 class="connected">✅ Conectado</h2>
-  <p>${statusMessage}</p>
-` : `
-  <h2>⏳ ${statusMessage}</h2>
-  <p>Espera mientras el bot se conecta...</p>
-`}
-<div class="footer">WhatsApp Bot</div>
-</div>
-</body></html>`);
+<div class="card">${body}</div>
+</body></html>`;
+
+const server = http.createServer((req, res) => {
+  res.writeHead(200, { 'Content-Type': 'text/html' });
+  if (req.url === '/' && pairingCode) {
+    res.end(html(`
+      <h2>📱 Código de vinculación</h2>
+      <div class="code">${pairingCode}</div>
+      <div class="step"><b>1.</b> Abre WhatsApp en tu iPhone</div>
+      <div class="step"><b>2.</b> Ve a Configuración > Dispositivos vinculados</div>
+      <div class="step"><b>3.</b> Toca "Vincular un dispositivo"</div>
+      <div class="step"><b>4.</b> Ingresa este código: <b>${pairingCode}</b></div>
+    `));
+  } else if (req.url === '/' && qrCode) {
+    res.end(html(`
+      <h2>📱 Escanea el QR</h2>
+      <img class="qr-img" src="${qrCode}" alt="QR"/>
+      <p>Abre WhatsApp > Configuración > Dispositivos vinculados</p>
+    `));
+  } else if (req.url === '/') {
+    res.end(html(`
+      <h2>⏳ ${statusMessage}</h2>
+      <p>Espera mientras el bot se conecta...</p>
+    `));
   } else {
-    res.writeHead(200, { 'Content-Type': 'text/plain' });
     res.end(statusMessage);
   }
 });
@@ -70,33 +75,47 @@ async function start() {
     version,
   });
 
-  if (!state.creds.registered) {
-    const phone = '573507927769';
-      statusMessage = 'Solicitando código...';
+  sock.ev.on('connection.update', async ({ connection, lastDisconnect, qr }) => {
+    if (qr) {
+      statusMessage = 'Escanea el QR o espera el código...';
+      // Show QR as fallback
+      try {
+        const QRCode = require('qrcode');
+        qrCode = await QRCode.toDataURL(qr, { width: 400, margin: 2 });
+      } catch {}
+    }
+
+    if (qr && !pairingCode && !state.creds.registered) {
       setTimeout(async () => {
         try {
-          let code = await sock.requestPairingCode(phone);
-          code = code?.match(/.{1,4}/g)?.join('-') || code;
-          pairingCode = code;
-          statusMessage = `Código: ${code}`;
-          console.log(`🔐 Código de vinculación: ${code}`);
-          console.log(`📱 Abre WhatsApp > Configuración > Dispositivos vinculados`);
-          console.log(`🔢 Ingresa el código: ${code}`);
+          console.log('🔑 Solicitando código de vinculación...');
+          statusMessage = 'Generando código...';
+          let code = await sock.requestPairingCode('573507927769');
+          if (code && typeof code === 'string') {
+            code = code.match(/.{1,4}/g)?.join('-') || code;
+            pairingCode = code;
+            qrCode = null;
+            statusMessage = `Código: ${code}`;
+            console.log(`🔐 Código: ${code}`);
+            console.log(`📱 WhatsApp > Config > Dispositivos vinculados`);
+            console.log(`🔢 Ingresa: ${code}`);
+          }
         } catch (err) {
-          statusMessage = `Error: ${err.message}`;
-          console.error('Error al solicitar pairing code:', err);
+          console.error('❌ Error pairing code:', err.message);
+          statusMessage = `Usa el QR. Error: ${err.message}`;
         }
-      }, 2000);
-  }
+      }, 3000);
+    }
 
-  sock.ev.on('connection.update', ({ connection, lastDisconnect }) => {
     if (connection === 'open') {
       pairingCode = null;
+      qrCode = null;
       const user = sock.user?.name || sock.user?.id || 'desconocido';
       statusMessage = `Conectado como ${user}`;
       console.log(`✅ Bot conectado como ${user}`);
       startScheduler(sock);
     }
+
     if (connection === 'close') {
       const reason = lastDisconnect?.error?.output?.statusCode;
       if (reason === DisconnectReason.loggedOut) {
