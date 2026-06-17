@@ -1,4 +1,4 @@
-const { getUser } = require('../services/database');
+const { getContact, getAllContacts, getContactsByTag, tagContact, updateContactName, updateContactNotes, getUser } = require('../services/database');
 const { handleGroupCommand } = require('../services/groups');
 const { addScheduledMessage, deleteScheduledMessage, getScheduledMessages } = require('../services/database');
 const { reloadScheduler } = require('../services/scheduler');
@@ -13,16 +13,22 @@ function getJid(msg) {
   return msg.key.remoteJid;
 }
 
+function getContactId(msg) {
+  const sender = msg.key.participant || msg.key.remoteJid;
+  return sender.replace('@s.whatsapp.net', '');
+}
+
 register('ping', async (sock, msg) => {
   await sock.sendMessage(getJid(msg), { text: 'pong 🏓' }, { quoted: msg });
 });
 
 register('help', async (sock, msg) => {
   const isGroup = getJid(msg).includes('@g.us');
-  let text = '📋 *Comandos:*\n\n';
-  text += '┃ !ping\n┃ !say <texto>\n┃ !info\n┃ !userinfo\n';
-  if (isGroup) text += '┃ !welcome\n┃ !antispam\n┃ !admin\n';
-  text += '\n⏰ !schedule add/list/remove';
+  let text = '🤖 *COMANDOS*\n\n';
+  text += '▸ !ping\n▸ !say <texto>\n▸ !info\n▸ !perfil\n▸ !contactos\n';
+  text += '▸ !tag <etiqueta> @usuario\n▸ !nota <texto>\n';
+  if (isGroup) text += '▸ !welcome\n▸ !antispam\n▸ !admin\n';
+  text += '▸ !schedule\n\n📌 Etiquetas: novia, amigo, familia, trabajo, extraño';
   await sock.sendMessage(getJid(msg), { text }, { quoted: msg });
 });
 
@@ -42,16 +48,77 @@ register('info', async (sock, msg) => {
   }, { quoted: msg });
 });
 
-register('userinfo', async (sock, msg) => {
-  const sender = msg.key.participant || msg.key.remoteJid;
-  const user = getUser(sender);
-  if (!user) {
+register('perfil', async (sock, msg) => {
+  const contactId = getContactId(msg);
+  const contact = getContact(contactId);
+  if (!contact) {
     await sock.sendMessage(getJid(msg), { text: 'Sin datos aún.' }, { quoted: msg });
     return;
   }
+  const tagEmoji = { novia: '💕', amigo: '🤙', familia: '👨‍👩‍👧‍👦', trabajo: '💼', extraño: '❓' };
+  const emoji = tagEmoji[contact.tag] || '👤';
   await sock.sendMessage(getJid(msg), {
-    text: `👤 *${sender.split('@')[0]}*\n📊 Mensajes: ${user.message_count}\n🕐 Primera vez: ${user.first_seen}\n🕐 Última: ${user.last_seen}`,
+    text: `${emoji} *${contact.name || contactId}*\n🏷️ Tag: ${contact.tag || 'sin tag'}\n📊 Mensajes: ${contact.message_count}\n🕐 Primera vez: ${contact.first_seen}\n🕐 Última vez: ${contact.last_seen}\n📝 Nota: ${contact.notes || 'sin nota'}`,
   }, { quoted: msg });
+});
+
+register('tag', async (sock, msg, args) => {
+  const sub = args[0]?.toLowerCase();
+  const allowed = ['novia', 'amigo', 'familia', 'trabajo', 'extraño'];
+
+  if (!sub || !allowed.includes(sub)) {
+    await sock.sendMessage(getJid(msg), {
+      text: `Uso: !tag <etiqueta>\nEtiquetas: ${allowed.join(', ')}\n\nEj: !tag novia\nEj: !tag amigo @usuario (en grupo)`,
+    }, { quoted: msg });
+    return;
+  }
+
+  const jid = getJid(msg);
+  const isGroup = jid.includes('@g.us');
+
+  if (isGroup && msg.message?.extendedTextMessage?.contextInfo?.mentionedJid?.length) {
+    const mentioned = msg.message.extendedTextMessage.contextInfo.mentionedJid[0];
+    const targetId = mentioned.replace('@s.whatsapp.net', '');
+    const name = args.slice(1).join(' ') || targetId;
+    tagContact(targetId, sub, name);
+    await sock.sendMessage(jid, { text: `✅ @${targetId} → *${sub}*`, mentions: [mentioned] }, { quoted: msg });
+  } else {
+    const contactId = getContactId(msg);
+    const name = args.slice(1).join(' ') || contactId;
+    tagContact(contactId, sub, name);
+    await sock.sendMessage(jid, { text: `✅ Actualizado → *${sub}*` }, { quoted: msg });
+  }
+});
+
+register('nota', async (sock, msg, args) => {
+  const text = args.join(' ');
+  if (!text) {
+    await sock.sendMessage(getJid(msg), { text: 'Uso: !nota <texto>' }, { quoted: msg });
+    return;
+  }
+  const contactId = getContactId(msg);
+  updateContactNotes(contactId, text);
+  await sock.sendMessage(getJid(msg), { text: '✅ Nota guardada.' }, { quoted: msg });
+});
+
+register('contactos', async (sock, msg, args) => {
+  const tag = args[0]?.toLowerCase();
+  const contacts = tag ? getContactsByTag(tag) : getAllContacts();
+
+  if (!contacts.length) {
+    await sock.sendMessage(getJid(msg), { text: 'Sin contactos registrados.' }, { quoted: msg });
+    return;
+  }
+
+  const tagEmoji = { novia: '💕', amigo: '🤙', familia: '👨‍👩‍👧‍👦', trabajo: '💼', extraño: '❓' };
+  let text = tag ? `📋 *${tag}s*\n\n` : '📋 *Todos los contactos*\n\n';
+  for (const c of contacts.slice(0, 20)) {
+    const emoji = tagEmoji[c.tag] || '👤';
+    text += `${emoji} ${c.name || c.id} (${c.message_count} msgs)\n`;
+  }
+  if (contacts.length > 20) text += `\ny ${contacts.length - 20} más...`;
+  text += `\n\nTotal: ${contacts.length}`;
+  await sock.sendMessage(getJid(msg), { text }, { quoted: msg });
 });
 
 register('schedule', async (sock, msg, args) => {

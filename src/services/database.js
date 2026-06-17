@@ -10,12 +10,14 @@ const db = new Database(DB_PATH);
 db.pragma('journal_mode = WAL');
 
 db.exec(`
-  CREATE TABLE IF NOT EXISTS users (
+  CREATE TABLE IF NOT EXISTS contacts (
     id TEXT PRIMARY KEY,
-    name TEXT,
+    name TEXT DEFAULT '',
+    tag TEXT DEFAULT '',
+    notes TEXT DEFAULT '',
+    message_count INTEGER DEFAULT 0,
     first_seen TEXT DEFAULT (datetime('now')),
-    last_seen TEXT DEFAULT (datetime('now')),
-    message_count INTEGER DEFAULT 0
+    last_seen TEXT DEFAULT (datetime('now'))
   );
 
   CREATE TABLE IF NOT EXISTS groups_config (
@@ -39,14 +41,19 @@ db.exec(`
 `);
 
 const stmts = {
-  upsertUser: db.prepare(`
-    INSERT INTO users (id, message_count, last_seen)
+  trackContact: db.prepare(`
+    INSERT INTO contacts (id, message_count, last_seen)
     VALUES (?, 1, datetime('now'))
     ON CONFLICT(id) DO UPDATE SET
       message_count = message_count + 1,
       last_seen = datetime('now')
   `),
-  getUser: db.prepare('SELECT * FROM users WHERE id = ?'),
+  getContact: db.prepare('SELECT * FROM contacts WHERE id = ?'),
+  getContactsByTag: db.prepare('SELECT * FROM contacts WHERE tag = ? ORDER BY last_seen DESC'),
+  getAllContacts: db.prepare('SELECT * FROM contacts ORDER BY last_seen DESC'),
+  tagContact: db.prepare("UPDATE contacts SET tag = ?, name = COALESCE(NULLIF(?, ''), name) WHERE id = ?"),
+  updateContactName: db.prepare('UPDATE contacts SET name = ? WHERE id = ?'),
+  updateContactNotes: db.prepare('UPDATE contacts SET notes = ? WHERE id = ?'),
   getGroupConfig: db.prepare('SELECT * FROM groups_config WHERE id = ?'),
   upsertGroupConfig: db.prepare(`
     INSERT INTO groups_config (id, welcome_enabled, welcome_message, anti_spam_enabled, anti_spam_limit, anti_spam_window, admins)
@@ -67,12 +74,37 @@ const stmts = {
   deleteScheduledMessage: db.prepare('DELETE FROM scheduled_messages WHERE id = ?'),
 };
 
-function trackUser(id) {
-  stmts.upsertUser.run(id);
+function trackContact(id) {
+  stmts.trackContact.run(id);
 }
 
-function getUser(id) {
-  return stmts.getUser.get(id);
+function getContact(id) {
+  let c = stmts.getContact.get(id);
+  if (!c) {
+    stmts.trackContact.run(id);
+    c = stmts.getContact.get(id);
+  }
+  return c;
+}
+
+function getContactsByTag(tag) {
+  return stmts.getContactsByTag.all(tag);
+}
+
+function getAllContacts() {
+  return stmts.getAllContacts.all();
+}
+
+function tagContact(id, tag, name) {
+  stmts.tagContact.run(tag, name || '', id);
+}
+
+function updateContactName(id, name) {
+  stmts.updateContactName.run(name, id);
+}
+
+function updateContactNotes(id, notes) {
+  stmts.updateContactNotes.run(notes, id);
 }
 
 function getGroupConfig(id) {
@@ -116,6 +148,8 @@ function deleteScheduledMessage(id) {
 }
 
 module.exports = {
-  db, trackUser, getUser, getGroupConfig, updateGroupConfig,
+  db, trackContact, getContact, getContactsByTag, getAllContacts,
+  tagContact, updateContactName, updateContactNotes,
+  getGroupConfig, updateGroupConfig,
   addScheduledMessage, getScheduledMessages, deleteScheduledMessage,
 };
