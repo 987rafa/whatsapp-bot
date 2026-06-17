@@ -29,6 +29,15 @@ p { color:#ccc; line-height:1.5; }
 </body></html>`;
 
 const server = http.createServer((req, res) => {
+  if (req.url === '/reset') {
+    const fs = require('fs');
+    const path = require('path');
+    const dir = path.join(__dirname, '../auth_info');
+    if (fs.existsSync(dir)) fs.rmSync(dir, { recursive: true });
+    res.writeHead(200, { 'Content-Type': 'text/html' });
+    res.end(html(`<h2>✅ Auth reiniciado</h2><p>Recarga la página para obtener un nuevo código.</p>`));
+    return;
+  }
   res.writeHead(200, { 'Content-Type': 'text/html' });
   if (req.url === '/' && pairingCode && qrCode) {
     res.end(html(`
@@ -64,14 +73,17 @@ server.listen(PORT, () => {
 async function start() {
   const { state, saveCreds } = await useMultiFileAuthState('auth_info');
 
-  const { version } = await fetchLatestBaileysVersion();
+  let version = (await fetchLatestBaileysVersion()).version;
   console.log(`📦 Baileys versión ${version}`);
 
   const sock = makeWASocket({
     auth: state,
     logger: pino({ level: 'silent' }),
     printQRInTerminal: false,
-    browser: ['Chrome (Linux)', '', ''],
+    browser: ['WhatsAppBot', 'Chrome', '124.0.0.0'],
+    connectTimeoutMs: 60000,
+    keepAliveIntervalMs: 25000,
+    markOnlineOnConnect: false,
     syncFullHistory: false,
     version,
   });
