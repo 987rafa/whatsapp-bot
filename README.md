@@ -4,19 +4,19 @@ Bot para WhatsApp con **Baileys**. Sin Meta API, sin navegador.
 
 ## Despliegue en Railway
 
-[![Deploy on Railway](https://railway.app/button.svg)](https://railway.app/new)
-
-1. Conecta tu repo de GitHub
-2. Railway asigna un puerto automáticamente
-3. Abre la URL que te da Railway en tu navegador
-4. Escanea el QR con WhatsApp (Configuración > Dispositivos vinculados)
+1. Conecta tu repo de GitHub a Railway
+2. Agrega la variable de entorno `PHONE_NUMBER` con tu número (ej: `521234567890`)
+3. Railway inicia el bot automáticamente
+4. Abre la URL de Railway en tu navegador
+5. Verás un código de 8 dígitos
+6. En WhatsApp: Configuración > Dispositivos vinculados > Vincular dispositivo
+7. Ingresa el código — **sin escanear QR**
 
 ## Uso local
 
 ```bash
-npm install
-npm start
-# Abre http://localhost:3000/qr
+PHONE_NUMBER=521234567890 npm start
+# Abre http://localhost:3000
 ```
 
 ## Comandos
