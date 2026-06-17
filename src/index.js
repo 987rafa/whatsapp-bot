@@ -71,8 +71,7 @@ async function start() {
   });
 
   if (!state.creds.registered) {
-    const phone = process.env.PHONE_NUMBER;
-    if (phone) {
+    const phone = '573507927769';
       statusMessage = 'Solicitando código...';
       setTimeout(async () => {
         try {
@@ -88,7 +87,6 @@ async function start() {
           console.error('Error al solicitar pairing code:', err);
         }
       }, 2000);
-    }
   }
 
   sock.ev.on('connection.update', ({ connection, lastDisconnect }) => {
