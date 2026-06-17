@@ -30,14 +30,15 @@ p { color:#ccc; line-height:1.5; }
 
 const server = http.createServer((req, res) => {
   res.writeHead(200, { 'Content-Type': 'text/html' });
-  if (req.url === '/' && pairingCode) {
+  if (req.url === '/' && pairingCode && qrCode) {
     res.end(html(`
-      <h2>📱 Código de vinculación</h2>
+      <h2>📱 Escanea el QR</h2>
+      <img class="qr-img" src="${qrCode}" alt="QR"/>
+      <p>Abre WhatsApp > Configuración > Dispositivos vinculados</p>
+      <hr style="border-color:#333;margin:30px 0">
+      <h2>O ingresa el código</h2>
       <div class="code">${pairingCode}</div>
-      <div class="step"><b>1.</b> Abre WhatsApp en tu iPhone</div>
-      <div class="step"><b>2.</b> Ve a Configuración > Dispositivos vinculados</div>
-      <div class="step"><b>3.</b> Toca "Vincular un dispositivo"</div>
-      <div class="step"><b>4.</b> Ingresa este código: <b>${pairingCode}</b></div>
+      <p>Toca "Vincular con número de teléfono" e ingresa: <b>${pairingCode}</b></p>
     `));
   } else if (req.url === '/' && qrCode) {
     res.end(html(`
@@ -94,7 +95,6 @@ async function start() {
           if (code && typeof code === 'string') {
             code = code.match(/.{1,4}/g)?.join('-') || code;
             pairingCode = code;
-            qrCode = null;
             statusMessage = `Código: ${code}`;
             console.log(`🔐 Código: ${code}`);
             console.log(`📱 WhatsApp > Config > Dispositivos vinculados`);
