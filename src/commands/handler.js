@@ -5,8 +5,15 @@ const { reloadScheduler } = require('../services/scheduler');
 const { clearChat } = require('../services/ai');
 const { clearMemory } = require('../services/memory');
 const { getRandomFact, getRandomQuote, getRandomCompliment, getRandomAdvice, getRandomJoke } = require('../services/knowledge');
-const { magic8ball, flipCoin, rollDice, startTrivia, answerTrivia } = require('../services/games');
+const { magic8ball, flipCoin, rollDice, startTrivia } = require('../services/games');
 const { getWeather } = require('../services/weather');
+const { addTodo, listTodos, toggleTodo, removeTodo } = require('../services/todo');
+const { addExpense, listExpenses, getTodayTotal, getByCategory } = require('../services/expenses');
+const { createPoll, getPoll, votePoll, getPollResults } = require('../services/polls');
+const { getRules, addRule, removeRule, toggleRule } = require('../services/rules');
+const { addBirthday, listBirthdays, removeBirthday } = require('../services/birthdays');
+const { generatePassword, countdown, convertCurrency, getTopNews } = require('../services/utils');
+const { imageToSticker } = require('../services/stickers');
 
 const commands = new Map();
 
@@ -30,7 +37,7 @@ register('ping', async (sock, msg) => {
 register('help', async (sock, msg) => {
   const isGroup = getJid(msg).includes('@g.us');
   let text = '🤖 *COMANDOS*\n\n';
-  text += '▸ !ping | !say\n▸ !perfil | !tag | !nota | !contactos\n▸ !dato | !frase | !chiste | !consejo\n▸ !cumplido | !hora | !fecha\n▸ !8ball <preg> | !moneda | !dado <caras>\n▸ !trivia | !clima <ciudad> | !traduce <texto>\n▸ !calc <expr>\n▸ !recuerdame <texto> | !recordatorios\n▸ !dibuja <descripción>\n▸ !reset\n';
+  text += '▸ !ping | !say\n▸ !perfil | !tag | !nota | !contactos\n▸ !dato | !frase | !chiste | !consejo\n▸ !cumplido | !hora | !fecha\n▸ !8ball | !moneda | !dado | !trivia\n▸ !clima | !traduce | !calc\n▸ !password | !cuentaregresiva 2025/12/25\n▸ !convertir 100 USD COP\n▸ !recuerdame | !recordatorios\n▸ !dibuja <desc>\n▸ !noticias\n▸ !gasto 5000 uber | !gastos\n▸ !todo agregar/completar/listar/borrar\n▸ !cumpleaños Juan 15/06 | !cumples\n▸ !regla agregar/borrar/listar <trigger> <resp>\n▸ !encuesta ¿pregunta? | op1 | op2\n▸ !sticker (responde a imagen)\n▸ !reset\n';
   if (isGroup) text += '\n▸ !welcome | !antispam | !admin\n';
   text += '\n▸ !schedule add/list/remove';
 
@@ -239,6 +246,198 @@ register('recordatorios', async (sock, msg) => {
   let t = '⏰ *Recordatorios*\n\n';
   for (const r of reminders) t += `#${r.id} "${r.message}" — ${r.remind_at}\n`;
   await sock.sendMessage(getJid(msg), { text: t }, { quoted: msg });
+});
+
+register('password', async (sock, msg, args) => {
+  const len = parseInt(args[0]) || 12;
+  await sock.sendMessage(getJid(msg), { text: `🔑 \`${generatePassword(len)}\`` }, { quoted: msg });
+});
+
+register('cuentaregresiva', async (sock, msg, args) => {
+  const dateStr = args.join(' ');
+  const match = dateStr.match(/(\d{4})[\-\/](\d{1,2})[\-\/](\d{1,2})/);
+  if (!match) return sock.sendMessage(getJid(msg), { text: 'Uso: !cuentaregresiva 2025/12/25' }, { quoted: msg });
+  await sock.sendMessage(getJid(msg), { text: countdown(parseInt(match[1]), parseInt(match[2]), parseInt(match[3])) }, { quoted: msg });
+});
+
+register('convertir', async (sock, msg, args) => {
+  const amount = parseFloat(args[0]);
+  const from = args[1]?.toUpperCase();
+  const to = args[2]?.toUpperCase();
+  if (!amount || !from || !to) return sock.sendMessage(getJid(msg), { text: 'Uso: !convertir 100 USD COP' }, { quoted: msg });
+  const result = await convertCurrency(amount, from, to);
+  await sock.sendMessage(getJid(msg), { text: result || 'No pude convertir.' }, { quoted: msg });
+});
+
+register('noticias', async (sock, msg) => {
+  const news = await getTopNews();
+  const text = Array.isArray(news) ? news.join('\n') : news;
+  await sock.sendMessage(getJid(msg), { text: text.substring(0, 1500) }, { quoted: msg });
+});
+
+register('gasto', async (sock, msg, args) => {
+  const text = args.join(' ');
+  const match = text.match(/(\d+[.]?\d*)\s*(.*)/);
+  if (!match) return sock.sendMessage(getJid(msg), { text: 'Uso: !gasto 5000 uber' }, { quoted: msg });
+  const amount = parseFloat(match[1]);
+  const desc = match[2] || 'sin concepto';
+  addExpense(getContactId(msg), amount, desc.split(' ')[0], desc);
+  const total = getTodayTotal(getContactId(msg));
+  await sock.sendMessage(getJid(msg), { text: `💸 Gastado: $${amount.toLocaleString()} en ${desc}\n💰 Hoy: $${total.toLocaleString()}` }, { quoted: msg });
+});
+
+register('gastos', async (sock, msg) => {
+  const userId = getContactId(msg);
+  const list = listExpenses(userId);
+  const total = getTodayTotal(userId);
+  const cats = getByCategory(userId);
+  let t = `💸 *Gastos de hoy* — Total: $${total.toLocaleString()}\n\n`;
+  for (const c of cats) t += `▸ ${c.category || 'sin categoría'}: $${c.total.toLocaleString()}\n`;
+  t += '\n*Últimos:*\n';
+  for (const e of list.slice(0, 5)) t += `• $${e.amount.toLocaleString()} - ${e.description}\n`;
+  await sock.sendMessage(getJid(msg), { text: t }, { quoted: msg });
+});
+
+register('todo', async (sock, msg, args) => {
+  const sub = args[0]?.toLowerCase();
+  const userId = getContactId(msg);
+  if (sub === 'agregar' || sub === 'a' || sub === 'add') {
+    const text = args.slice(1).join(' ');
+    if (!text) return sock.sendMessage(getJid(msg), { text: 'Uso: !todo agregar <tarea>' }, { quoted: msg });
+    addTodo(userId, text);
+    await sock.sendMessage(getJid(msg), { text: `✅ Tarea agregada: ${text}` }, { quoted: msg });
+  } else if (sub === 'completar' || sub === 'c' || sub === 'done') {
+    const id = parseInt(args[1]);
+    if (!id || !toggleTodo(id, userId)) return sock.sendMessage(getJid(msg), { text: 'ID inválido' }, { quoted: msg });
+    await sock.sendMessage(getJid(msg), { text: `✅ Tarea #${id} marcada como completada` }, { quoted: msg });
+  } else if (sub === 'borrar' || sub === 'b' || sub === 'del' || sub === 'delete') {
+    const id = parseInt(args[1]);
+    if (!id || !removeTodo(id, userId)) return sock.sendMessage(getJid(msg), { text: 'ID inválido' }, { quoted: msg });
+    await sock.sendMessage(getJid(msg), { text: `🗑️ Tarea #${id} eliminada` }, { quoted: msg });
+  } else {
+    const todos = listTodos(userId);
+    if (!todos.length) return sock.sendMessage(getJid(msg), { text: 'Sin tareas pendientes.' }, { quoted: msg });
+    let t = '📋 *Tareas*\n\n';
+    for (const todo of todos) t += `${todo.done ? '✅' : '⬜'} #${todo.id} ${todo.text}\n`;
+    await sock.sendMessage(getJid(msg), { text: t }, { quoted: msg });
+  }
+});
+
+register('cumpleaños', async (sock, msg, args) => {
+  const sub = args[0]?.toLowerCase();
+  const userId = getContactId(msg);
+  if (sub === 'agregar' || (!sub?.match(/^\d/) && args.length >= 2)) {
+    const offset = sub === 'agregar' ? 1 : 0;
+    const name = args[offset];
+    const dateMatch = args[offset + 1]?.match(/(\d{1,2})[\/-](\d{1,2})/);
+    if (!name || !dateMatch) return sock.sendMessage(getJid(msg), { text: 'Uso: !cumpleaños Juan 15/06' }, { quoted: msg });
+    addBirthday(userId, name, parseInt(dateMatch[1]), parseInt(dateMatch[2]));
+    await sock.sendMessage(getJid(msg), { text: `✅ Cumpleaños de ${name}: ${dateMatch[1]}/${dateMatch[2]}` }, { quoted: msg });
+  } else if (sub === 'borrar' || sub === 'delete' || sub === 'remove') {
+    const id = parseInt(args[1]);
+    if (!id || !removeBirthday(id, userId)) return sock.sendMessage(getJid(msg), { text: 'ID inválido' }, { quoted: msg });
+    await sock.sendMessage(getJid(msg), { text: `🗑️ Cumpleaños #${id} eliminado` }, { quoted: msg });
+  } else {
+    const birthdays = listBirthdays(userId);
+    if (!birthdays.length) return sock.sendMessage(getJid(msg), { text: 'Sin cumpleaños registrados.' }, { quoted: msg });
+    let t = '🎂 *Cumpleaños*\n\n';
+    for (const b of birthdays) t += `#${b.id} ${b.name}: ${b.day}/${String(b.month).padStart(2, '0')}\n`;
+    await sock.sendMessage(getJid(msg), { text: t }, { quoted: msg });
+  }
+});
+
+register('cumples', async (sock, msg) => {
+  const { getTodayBirthdays } = require('../services/birthdays');
+  const today = getTodayBirthdays();
+  if (!today.length) return;
+  for (const b of today) {
+    await sock.sendMessage(getJid(msg), { text: `🎂 ¡Hoy es el cumpleaños de ${b.name}! 🎉` });
+  }
+});
+
+register('regla', async (sock, msg, args) => {
+  const sub = args[0]?.toLowerCase();
+  const userId = getContactId(msg);
+  if (sub === 'agregar' || sub === 'add') {
+    const sep = args.indexOf('=>');
+    if (sep === -1) return sock.sendMessage(getJid(msg), { text: 'Uso: !regla agregar <trigger> => <respuesta>' }, { quoted: msg });
+    const trigger = args.slice(1, sep).join(' ');
+    const response = args.slice(sep + 1).join(' ');
+    if (!trigger || !response) return sock.sendMessage(getJid(msg), { text: 'Falta trigger o respuesta' }, { quoted: msg });
+    addRule(userId, trigger, response);
+    await sock.sendMessage(getJid(msg), { text: `✅ Regla: "${trigger}" → "${response}"` }, { quoted: msg });
+  } else if (sub === 'borrar' || sub === 'delete') {
+    const id = parseInt(args[1]);
+    if (!id || !toggleRule(id, userId)) return sock.sendMessage(getJid(msg), { text: 'ID inválido' }, { quoted: msg });
+    await sock.sendMessage(getJid(msg), { text: `🗑️ Regla #${id} eliminada` }, { quoted: msg });
+  } else {
+    const rules = getRules(userId);
+    if (!rules.length) return sock.sendMessage(getJid(msg), { text: 'Sin reglas. Ej: !regla agregar hola => hola como estas' }, { quoted: msg });
+    let t = '📜 *Reglas personalizadas*\n\n';
+    for (const r of rules) t += `#${r.id} "${r.trigger}" → "${r.response}"\n`;
+    await sock.sendMessage(getJid(msg), { text: t }, { quoted: msg });
+  }
+});
+
+register('encuesta', async (sock, msg, args) => {
+  const text = args.join(' ');
+  const parts = text.split('|').map(s => s.trim());
+  if (parts.length < 3) return sock.sendMessage(getJid(msg), { text: 'Uso: !encuesta ¿pregunta? | op1 | op2 | op3' }, { quoted: msg });
+  const question = parts[0];
+  const options = parts.slice(1);
+  const pollId = createPoll(getJid(msg), question, options, getContactId(msg));
+  let r = `🗳️ *${question}*\n\n`;
+  options.forEach((opt, i) => { r += `${i + 1}. ${opt}\n`; });
+  r += `\nVota con: !votar ${pollId} <número>`;
+  await sock.sendMessage(getJid(msg), { text: r }, { quoted: msg });
+});
+
+register('votar', async (sock, msg, args) => {
+  const pollId = parseInt(args[0]);
+  const option = parseInt(args[1]) - 1;
+  if (!pollId || isNaN(option)) return sock.sendMessage(getJid(msg), { text: 'Uso: !votar <id> <número>' }, { quoted: msg });
+  const result = votePoll(pollId, option, getContactId(msg));
+  if (result === 'no-existe') return sock.sendMessage(getJid(msg), { text: 'Esa encuesta no existe.' }, { quoted: msg });
+  if (result === 'ya-voto') return sock.sendMessage(getJid(msg), { text: 'Ya votaste en esta encuesta.' }, { quoted: msg });
+  if (result === 'invalido') return sock.sendMessage(getJid(msg), { text: 'Opción inválida.' }, { quoted: msg });
+  const poll = getPoll(pollId);
+  await sock.sendMessage(getJid(msg), { text: getPollResults(poll) }, { quoted: msg });
+});
+
+register('resultados', async (sock, msg, args) => {
+  const pollId = parseInt(args[0]);
+  if (!pollId) return sock.sendMessage(getJid(msg), { text: 'Uso: !resultados <id_encuesta>' }, { quoted: msg });
+  const poll = getPoll(pollId);
+  if (!poll) return sock.sendMessage(getJid(msg), { text: 'Encuesta no encontrada.' }, { quoted: msg });
+  await sock.sendMessage(getJid(msg), { text: getPollResults(poll) }, { quoted: msg });
+});
+
+register('sticker', async (sock, msg) => {
+  const quoted = msg.message?.extendedTextMessage?.contextInfo?.quotedMessage;
+  if (!quoted?.imageMessage) return sock.sendMessage(getJid(msg), { text: 'Responde a una imagen con !sticker' }, { quoted: msg });
+
+  // Reconstruct quoted msg for downloadMediaMessage
+  const { downloadMediaMessage } = require('@whiskeysockets/baileys');
+  const quotedMsg = {
+    key: { remoteJid: getJid(msg), fromMe: false, id: msg.message.extendedTextMessage.contextInfo.stanzaId },
+    message: { imageMessage: quoted.imageMessage },
+  };
+
+  const buffer = await downloadMediaMessage(quotedMsg, 'buffer', {}, { logger: undefined });
+  if (!buffer) return sock.sendMessage(getJid(msg), { text: 'No pude descargar la imagen.' }, { quoted: msg });
+
+  const sharp = require('sharp');
+  const fs = require('fs');
+  const path = require('path');
+  const tmp = path.join(__dirname, '../../data/temp');
+  fs.mkdirSync(tmp, { recursive: true });
+  const inp = path.join(tmp, `si_${Date.now()}.webp`);
+  const out = path.join(tmp, `so_${Date.now()}.webp`);
+  fs.writeFileSync(inp, buffer);
+  await sharp(inp).resize(512, 512, { fit: 'cover' }).webp({ quality: 80 }).toFile(out);
+  const stickerBuf = fs.readFileSync(out);
+  fs.unlinkSync(inp); fs.unlinkSync(out);
+  await sock.sendMessage(getJid(msg), { sticker: stickerBuf }, { quoted: msg });
 });
 
 register('schedule', async (sock, msg, args) => {

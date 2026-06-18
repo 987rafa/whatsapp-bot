@@ -7,6 +7,8 @@ const { getProfile, analyzeMessage } = require('./learning');
 const { getSystemPrompt, randomDelay } = require('./personality');
 const { triviaTimeout, answerTrivia } = require('./games');
 const { extractUrls, scrapeLink } = require('./links');
+const { saveDeletedMessage } = require('./antidelete');
+const { checkRules } = require('./rules');
 
 function extractText(msg) {
   return msg.message?.conversation ||
@@ -95,6 +97,14 @@ async function handleMessage(sock, msg) {
       await sock.sendMessage(jid, { text: result }, { quoted: msg });
       return;
     }
+  }
+
+  // Custom auto-rules
+  const ruleResponse = checkRules(text, contactId);
+  if (ruleResponse) {
+    await new Promise(r => setTimeout(r, randomDelay()));
+    await sock.sendMessage(jid, { text: ruleResponse }, { quoted: msg });
+    return;
   }
 
   // Link detection
@@ -205,4 +215,28 @@ async function handleGroupNotification(sock, notification) {
   }
 }
 
-module.exports = { handleMessage, handleGroupNotification, getJid, getSender, isGroup, extractText, getContactId };
+async function restoreDeletedMessage(sock, key) {
+  try {
+    const chatId = key.remoteJid;
+    if (!chatId || chatId === 'status@broadcast') return;
+
+    const msg = await sock.loadMessage(key.id);
+    if (!msg) return;
+
+    const text = msg.message?.conversation || msg.message?.extendedTextMessage?.text || '';
+    const sender = key.participant || key.remoteJid;
+    const shortId = sender.replace('@s.whatsapp.net', '');
+
+    saveDeletedMessage(chatId, shortId, text);
+
+    await sock.sendMessage(chatId, {
+      text: `🚫 *@${shortId} eliminó un mensaje:*\n${text || '*multimedia*'}`,
+      mentions: [sender],
+    });
+  } catch {}
+}
+
+module.exports = {
+  handleMessage, handleGroupNotification, restoreDeletedMessage,
+  getJid, getSender, isGroup, extractText, getContactId,
+};

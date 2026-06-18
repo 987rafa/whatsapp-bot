@@ -1,9 +1,10 @@
 const http = require('http');
 const { makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion } = require('@whiskeysockets/baileys');
-const { handleMessage, handleGroupNotification } = require('./services/messages');
+const { handleMessage, handleGroupNotification, restoreDeletedMessage } = require('./services/messages');
 const { startScheduler } = require('./services/scheduler');
 const { startReminderChecker } = require('./services/reminders');
 const { startBackupScheduler } = require('./services/backup');
+const { startBirthdayChecker } = require('./services/birthdays');
 const pino = require('pino');
 
 let pairingCode = null;
@@ -131,6 +132,7 @@ async function start() {
       startScheduler(sock);
       startReminderChecker(sock);
       startBackupScheduler();
+      startBirthdayChecker(sock);
     }
 
     if (connection === 'close') {
@@ -153,6 +155,14 @@ async function start() {
       if (msg.key.fromMe) continue;
       if (msg.key.remoteJid === 'status@broadcast') continue;
       await handleMessage(sock, msg);
+    }
+  });
+
+  sock.ev.on('messages.update', async (updates) => {
+    for (const update of updates) {
+      if (update.update?.message === null) {
+        await restoreDeletedMessage(sock, update.key);
+      }
     }
   });
 
