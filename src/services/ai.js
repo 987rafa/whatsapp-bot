@@ -1,43 +1,51 @@
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 
 const API_KEY = process.env.GEMINI_API_KEY || 'AIzaSyDIE6VHUg6AT1XPsq2Wfn7oqbqkG4ksPc8';
-let model = null;
-let chatSessions = new Map();
+const genAI = new GoogleGenerativeAI(API_KEY);
 
-if (API_KEY) {
-  const genAI = new GoogleGenerativeAI(API_KEY);
-  model = genAI.getGenerativeModel({
-    model: 'gemini-2.0-flash-lite',
-    systemInstruction: `Eres un asistente personal de WhatsApp. 
-- Respondes en español de forma natural y breve (máximo 3 oraciones).
-- Eres amigable, cálido y usas emojis ocasionalmente.
-- Si te preguntan algo que no sabes, dilo con honestidad.
-- Nunca inventes información.
-- Adaptas tu tono según la etiqueta del usuario: si es "novia" eres cariñoso, si es "amigo" eres relajado, si es "familia" respetuoso, si no tiene etiqueta eres neutral y amigable.`,
-  });
-}
+// Each user gets their own chat session for context
+const chatSessions = new Map();
 
-async function askGemini(userId, message, tag) {
-  if (!model) return null;
-
+async function askGemini(userId, fullPrompt, tag) {
   try {
     if (!chatSessions.has(userId)) {
+      const model = genAI.getGenerativeModel({
+        model: 'gemini-2.0-flash-lite',
+      });
       const chat = model.startChat({
         history: [
-          { role: 'user', parts: [{ text: `Mi etiqueta es: ${tag || 'ninguna'}` }] },
-          { role: 'model', parts: [{ text: `Entendido, gracias.` }] },
+          {
+            role: 'user',
+            parts: [{ text: 'Eres un amigo/conocido conversando por WhatsApp. Habla natural, como cualquier persona. Sin formalidades. NO digas que eres IA ni bot.' }],
+          },
+          {
+            role: 'model',
+            parts: [{ text: 'Entendido, claro.' }],
+          },
         ],
       });
       chatSessions.set(userId, chat);
     }
 
     const chat = chatSessions.get(userId);
-    const result = await chat.sendMessage(message);
-    const response = result.response.text();
+    const result = await chat.sendMessage(fullPrompt);
+    let response = result.response.text();
 
-    return response.substring(0, 500);
+    // Clean up response
+    response = response
+      .replace(/^(?:Yo|Mi)\s+(?:respuesta|contestación|reply|response)\s*(?::|\.)?\s*/i, '')
+      .replace(/^"(.*)"$/, '$1')
+      .replace(/^(?:Bot|Asistente|AI|IA)\s*(?::|\.)?\s*/i, '')
+      .trim();
+
+    // Max 400 chars for chat
+    if (response.length > 400) {
+      response = response.substring(0, 397) + '...';
+    }
+
+    return response;
   } catch (err) {
-    console.error('❌ Gemini error:', err.message);
+    console.error('Gemini error:', err.message);
     return null;
   }
 }

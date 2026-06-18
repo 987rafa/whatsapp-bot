@@ -2,8 +2,8 @@ const { getContact, getAllContacts, getContactsByTag, tagContact, updateContactN
 const { handleGroupCommand } = require('../services/groups');
 const { addScheduledMessage, deleteScheduledMessage, getScheduledMessages } = require('../services/database');
 const { reloadScheduler } = require('../services/scheduler');
-const { askGemini, clearChat } = require('../services/ai');
-const { clearMemory, getMemory } = require('../services/memory');
+const { clearChat } = require('../services/ai');
+const { clearMemory } = require('../services/memory');
 const { getRandomFact, getRandomQuote, getRandomCompliment, getRandomAdvice, getRandomJoke } = require('../services/knowledge');
 const { magic8ball, flipCoin, rollDice, startTrivia, answerTrivia } = require('../services/games');
 const { getWeather } = require('../services/weather');
@@ -30,7 +30,7 @@ register('ping', async (sock, msg) => {
 register('help', async (sock, msg) => {
   const isGroup = getJid(msg).includes('@g.us');
   let text = '🤖 *COMANDOS*\n\n';
-  text += '▸ !ping | !say\n▸ !perfil | !tag | !nota | !contactos\n▸ !dato | !frase | !chiste | !consejo\n▸ !cumplido | !hora | !fecha\n▸ !8ball <preg> | !moneda | !dado <caras>\n▸ !trivia | !clima <ciudad>\n▸ !calc <expr>\n▸ !char <texto> (IA)\n▸ !olvidar (borra memoria)\n';
+  text += '▸ !ping | !say\n▸ !perfil | !tag | !nota | !contactos\n▸ !dato | !frase | !chiste | !consejo\n▸ !cumplido | !hora | !fecha\n▸ !8ball <preg> | !moneda | !dado <caras>\n▸ !trivia | !clima <ciudad>\n▸ !calc <expr>\n▸ !reset\n';
   if (isGroup) text += '\n▸ !welcome | !antispam | !admin\n';
   text += '\n▸ !schedule add/list/remove';
 
@@ -171,14 +171,11 @@ register('olvidar', async (sock, msg) => {
   await sock.sendMessage(getJid(msg), { text: '🗑️ Memoria borrada. Ahora no recuerdo nada de ti.' }, { quoted: msg });
 });
 
-register('char', async (sock, msg, args) => {
-  const text = args.join(' ');
-  if (!text) return sock.sendMessage(getJid(msg), { text: 'Uso: !char <mensaje>' }, { quoted: msg });
-
-  const contactId = getContactId(msg);
-  const contact = getContact(contactId);
-  const response = await askGemini(contactId, text, contact?.tag || '');
-  await sock.sendMessage(getJid(msg), { text: response || '❌ No pude procesar eso.' }, { quoted: msg });
+register('reset', async (sock, msg) => {
+  const cid = getContactId(msg);
+  clearMemory(cid);
+  clearChat(cid);
+  await sock.sendMessage(getJid(msg), { text: 'Listo, empecemos de nuevo 👋' }, { quoted: msg });
 });
 
 register('schedule', async (sock, msg, args) => {

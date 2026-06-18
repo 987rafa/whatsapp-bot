@@ -1,11 +1,11 @@
 const { trackContact, getContact } = require('./database');
 const { checkAntiSpam } = require('./groups');
 const { processCommand } = require('../commands/handler');
-const { askGemini } = require('./ai');
+const { askGemini, clearChat } = require('./ai');
 const { addToMemory, getContext } = require('./memory');
-const { getRandomFact, getRandomQuote, getRandomCompliment, getRandomAdvice, getRandomJoke } = require('./knowledge');
-const { magic8ball, flipCoin, rollDice, startTrivia, answerTrivia, triviaTimeout } = require('./games');
-const { getWeather } = require('./weather');
+const { getProfile, analyzeMessage, updateProfile } = require('./learning');
+const { getSystemPrompt, randomDelay } = require('./personality');
+const { triviaTimeout, answerTrivia } = require('./games');
 
 function extractText(msg) {
   return msg.message?.conversation ||
@@ -46,6 +46,11 @@ async function handleMessage(sock, msg) {
     if (isSpam) return;
   }
 
+  // Track for learning
+  const profile = getProfile(contactId) || {};
+  analyzeMessage(contactId, text, profile);
+
+  // Commands bypass AI
   if (text.startsWith('!')) {
     addToMemory(contactId, 'user', text);
     await processCommand(sock, msg, text);
@@ -53,7 +58,100 @@ async function handleMessage(sock, msg) {
   }
 
   addToMemory(contactId, 'user', text);
-  await autoReply(sock, msg, text, contactId);
+
+  // Check trivia
+  if (triviaTimeout(contactId) && text.length < 50) {
+    const result = answerTrivia(contactId, text);
+    if (result) {
+      await sock.sendMessage(jid, { text: result }, { quoted: msg });
+      return;
+    }
+  }
+
+  // AI-powered natural response
+  await aiReply(sock, msg, text, contactId, profile);
+}
+
+async function aiReply(sock, msg, body, contactId, profile) {
+  const jid = getJid(msg);
+  const context = getContext(contactId, 6);
+  const systemPrompt = getSystemPrompt(profile);
+
+  // Build enhanced prompt for Gemini
+  let prompt = `${systemPrompt}\n\n`;
+  if (context) {
+    prompt += `Historial reciente de la conversación:\n${context}\n\n`;
+  }
+  prompt += `Mensaje de ${profile.name || 'la persona'}: ${body}\n\nTu respuesta natural:`;
+
+  const aiResponse = await askGemini(contactId, prompt, profile.tag || '');
+
+  if (aiResponse) {
+    addToMemory(contactId, 'bot', aiResponse);
+
+    // Human-like delay then send
+    const delay = randomDelay();
+    await new Promise(r => setTimeout(r, delay));
+
+    await sock.sendMessage(jid, { text: aiResponse }, { quoted: msg });
+    return;
+  }
+
+  // Fallback ultra natural
+  await naturalFallback(sock, msg, body, contactId, profile);
+}
+
+async function naturalFallback(sock, msg, body, contactId, profile) {
+  const jid = getJid(msg);
+  const tag = profile?.tag || '';
+  const name = profile?.name || '';
+
+  // Short/ultra-casual responses for common patterns
+  const lower = body.toLowerCase().trim();
+
+  // One-word or very short reactions
+  if (lower.length < 3) {
+    await sock.sendMessage(jid, { text: ['jaja', 'sí', 'no', 'ok', 'sabes', 'pues'][Math.floor(Math.random() * 6)] }, { quoted: msg });
+    return;
+  }
+
+  // Tag-specific natural starters
+  const starters = {
+    novia: [
+      'Ay mi amor', 'Pues mira', 'La verdad', 'Es que', 'Ay no',
+      'Mi vida', 'Corazón', 'Amor', 'Bebé',
+    ],
+    amigo: [
+      'Pues parce', 'La verdad', 'Es que', 'Oye', 'Mira',
+      'Sabes qué', 'Bro', 'Pana', 'Llave',
+    ],
+    familia: [
+      'Pues', 'Mire', 'La verdad', 'Es que', 'Bueno',
+    ],
+  };
+
+  const starterList = starters[tag] || ['Pues', 'Mira', 'La verdad', 'Es que', 'Oye', 'Bueno'];
+  const starter = starterList[Math.floor(Math.random() * starterList.length)];
+
+  const replies = [
+    `${starter} no sé qué decirte la verdad jeje`,
+    `${starter} interesante lo que me cuentas`,
+    'Pues sí, puede ser',
+    'No sabía eso, qué loco',
+    'Jaja pues sí',
+    'La verdad no tengo mucha idea de eso',
+    'Qué interesante, cuéntame más',
+    'Mmm no sé, qué piensas tú?',
+    'Pues mira, cada quien tiene su opinión',
+    'Sí, te entiendo completamente',
+    'Qué loco, no sabía eso',
+    'Hmm ya veo, y eso?',
+  ];
+
+  const reply = replies[Math.floor(Math.random() * replies.length)];
+  const delay = 1500 + Math.random() * 2000;
+  await new Promise(r => setTimeout(r, delay));
+  await sock.sendMessage(jid, { text: reply }, { quoted: msg });
 }
 
 async function handleGroupNotification(sock, notification) {
@@ -61,144 +159,6 @@ async function handleGroupNotification(sock, notification) {
     const { handleGroupJoin } = require('./groups');
     await handleGroupJoin(sock, notification);
   }
-}
-
-function getGreeting() {
-  const h = new Date().getHours();
-  if (h < 12) return 'Buenos días';
-  if (h < 18) return 'Buenas tardes';
-  return 'Buenas noches';
-}
-
-async function autoReply(sock, msg, body, contactId) {
-  const lower = body.toLowerCase().trim();
-  const jid = getJid(msg);
-  const contact = getContact(contactId);
-  const tag = contact?.tag || '';
-  const name = contact?.name || contactId;
-  const greeting = getGreeting();
-
-  // --- MEMORY CHECK ---
-  if (triviaTimeout(contactId) && lower.length < 50) {
-    const result = answerTrivia(contactId, lower);
-    if (result) {
-      await sock.sendMessage(jid, { text: result }, { quoted: msg });
-      return;
-    }
-  }
-
-  // --- TAG-BASED REPLIES ---
-  const tagReplies = {
-    novia: [
-      { words: ['hola', 'buenas', 'buen'], reply: `${greeting} mi amor ❤️ ¿Cómo estás?` },
-      { words: ['gracias'], reply: 'Siempre para ti, hermosa 💕' },
-      { words: ['te quiero', 'te amo'], reply: 'Yo también te quiero mucho mi amor 🥰❤️' },
-      { words: ['extraño', 'extraña'], reply: 'Yo también te extraño, mi vida 💗' },
-      { words: ['besos', 'beso'], reply: 'Un abrazo gigante para vos 🫂❤️' },
-      { words: ['bonita', 'hermosa'], reply: 'Tú eres la hermosa, mi amor 💕' },
-      { words: ['cómo estás', 'como estas', 'que tal'], reply: 'Bien mi amor, pensando en ti 💭❤️' },
-      { words: ['adios', 'bye', 'chao', 'nos vemos'], reply: 'Cuídate mucho mi amor 💕 te quiero' },
-    ],
-    amigo: [
-      { words: ['hola', 'buenas', 'buen'], reply: `¡${greeting}, ${name}! ¿Todo bien? 🤙` },
-      { words: ['gracias'], reply: '¡De nada, bro! 😎' },
-      { words: ['que haces', 'qué haces', 'como vas'], reply: 'Acá nomás, servidor 24/7 🤖 ¿Vos?' },
-      { words: ['jaja', 'jajaja', 'lol', 'xd'], reply: 'Jajaja 😂 buena esa' },
-      { words: ['amigo', 'bro', 'hermano', 'pana'], reply: 'Grande loco! 🙌' },
-      { words: ['adios', 'bye', 'chao', 'nos vemos'], reply: 'Ahí nos vemos! 👋' },
-      { words: ['fiesta', 'rumba', 'cerveza'], reply: '🔥🔥🔥 suena bien!' },
-    ],
-    familia: [
-      { words: ['hola', 'buenas', 'buen'], reply: `${greeting}, ${name} 😊 ¿Cómo está todo?` },
-      { words: ['gracias'], reply: 'Con gusto, para eso estoy 👍' },
-      { words: ['bien', 'bueno'], reply: '¡Qué bueno! Me alegro 😊' },
-      { words: ['adios', 'bye', 'chao'], reply: 'Cuídate mucho! 🙏' },
-      { words: ['cómo estás', 'como estas'], reply: 'Todo bien gracias 🫶 ¿y usted?' },
-    ],
-  };
-
-  if (tagReplies[tag]) {
-    for (const rule of tagReplies[tag]) {
-      if (rule.words.some(w => lower.includes(w))) {
-        addToMemory(contactId, 'bot', rule.reply);
-        await sock.sendMessage(jid, { text: rule.reply }, { quoted: msg });
-        return;
-      }
-    }
-  }
-
-  // --- GENERAL KNOWLEDGE PATTERNS ---
-  const generalRules = [
-    { words: ['hola', 'buenas', 'buen día', 'buenas tardes', 'buenas noches'], reply: `¡${greeting}! 👋 ¿En qué te ayudo?` },
-    { words: ['gracias', 'thank'], reply: '¡De nada! 😊' },
-    { words: ['quien eres', 'quién eres', 'quien sos', 'qué eres'], reply: 'Soy tu bot de WhatsApp 🤖 Creado con Baileys y mucho cariño' },
-    { words: ['adios', 'bye', 'chao', 'nos vemos', 'hasta luego'], reply: '¡Hasta luego! 👋' },
-    { words: ['te quiero', 'te amo'], reply: tag === 'novia' ? 'Yo también te amo ❤️🥰' : '🥰❤️' },
-    { words: ['bien y tú', 'bien y tu', 'bien gracias'], reply: '¡Me alegra! 🎉' },
-    { words: ['qué haces', 'que haces', 'ocupado'], reply: 'Aquí disponible para ti 24/7 🤖' },
-    { words: ['dato', 'dato curioso', 'sabías que', 'sabias que'], reply: `🐝 ${getRandomFact()}` },
-    { words: ['frase', 'cita', 'quote', 'inspira'], reply: `"${getRandomQuote().text}" — ${getRandomQuote().author} ✨` },
-    { words: ['cumplido', 'piropo', 'algo bonito'], reply: getRandomCompliment() },
-    { words: ['consejo', 'tip', 'recomienda'], reply: `💡 ${getRandomAdvice()}` },
-    { words: ['chiste', 'broma', 'joke', 'risa'], reply: getRandomJoke() },
-    { words: ['hora', 'qué hora es', 'que hora es'], reply: `🕐 Son las ${new Date().toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' })}` },
-    { words: ['fecha', 'qué día es', 'que dia es', 'fecha de hoy'], reply: `📅 Hoy es ${new Date().toLocaleDateString('es-CO', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}` },
-    { words: ['día de la semana', 'que día es', 'que dia es hoy'], reply: `📅 ${new Date().toLocaleDateString('es-CO', { weekday: 'long' })}` },
-  ];
-
-  for (const rule of generalRules) {
-    if (rule.words.some(w => lower.includes(w))) {
-      addToMemory(contactId, 'bot', rule.reply);
-      await sock.sendMessage(jid, { text: rule.reply }, { quoted: msg });
-      return;
-    }
-  }
-
-  // --- WEATHER ---
-  const climaMatch = lower.match(/clima\s+(\w+)|tiempo\s+(\w+)|clima|tiempo/);
-  if (climaMatch) {
-    const location = climaMatch[1] || climaMatch[2] || '';
-    const report = await getWeather(location || 'Bogotá');
-    if (report) {
-      await sock.sendMessage(jid, { text: `🌤️ Clima: ${report}` }, { quoted: msg });
-    } else {
-      await sock.sendMessage(jid, { text: 'No pude obtener el clima.' }, { quoted: msg });
-    }
-    return;
-  }
-
-  // --- CALCULATOR ---
-  const calcMatch = lower.match(/^([\d\s+\-*/().]+)$/);
-  if (calcMatch && /[+\-*/]/.test(lower) && !isNaN(eval(lower))) {
-    try {
-      const result = eval(lower);
-      await sock.sendMessage(jid, { text: `🧮 ${lower} = ${result}` }, { quoted: msg });
-      return;
-    } catch {}
-  }
-
-  // --- GEMINI AI ---
-  const context = getContext(contactId, 3);
-  const prompt = context ? `Contexto:\n${context}\n\nUsuario: ${body}` : body;
-  const aiResponse = await askGemini(contactId, prompt, tag);
-  if (aiResponse) {
-    addToMemory(contactId, 'bot', aiResponse);
-    await sock.sendMessage(jid, { text: aiResponse }, { quoted: msg });
-    return;
-  }
-
-  // --- FALLBACK ---
-  const fallback = [
-    'Interesante, cuéntame más 🤔',
-    '¿En serio? 😮',
-    'No sabía eso, gracias por contarme 👍',
-    'Entiendo, ¿y qué más? 🤓',
-    'Vaya, qué interesante 🧐',
-    'Anotado ✅ Siempre aprendo algo nuevo contigo',
-  ];
-  const reply = fallback[Math.floor(Math.random() * fallback.length)];
-  addToMemory(contactId, 'bot', reply);
-  await sock.sendMessage(jid, { text: reply }, { quoted: msg });
 }
 
 module.exports = { handleMessage, handleGroupNotification, getJid, getSender, isGroup, extractText, getContactId };
