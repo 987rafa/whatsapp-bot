@@ -30,6 +30,10 @@ function isGroup(msg) {
   return getJid(msg).includes('@g.us');
 }
 
+function getBotJid(sock) {
+  return sock.user?.id?.replace(/:.*$/, '') || '';
+}
+
 function getContactId(jid) {
   return jid.replace('@s.whatsapp.net', '');
 }
@@ -50,11 +54,30 @@ function isImage(msg) {
 
 async function downloadMedia(sock, msg) {
   try {
-    const buffer = await sock.downloadMediaMessage(msg);
-    return buffer;
+    return await sock.downloadMediaMessage(msg);
   } catch {
     return null;
   }
+}
+
+function isBotMentioned(msg, botJid) {
+  const mentions = msg.message?.extendedTextMessage?.contextInfo?.mentionedJid;
+  return mentions?.includes(botJid) || false;
+}
+
+function isReplyToBot(msg, botJid) {
+  const replyTo = msg.message?.extendedTextMessage?.contextInfo?.participant;
+  return replyTo === botJid;
+}
+
+function shouldReplyInGroup(msg, botJid) {
+  if (isBotMentioned(msg, botJid)) return true;
+  if (isReplyToBot(msg, botJid)) return true;
+  const text = extractText(msg).trim().toLowerCase();
+  if (!text) return false;
+  const botShort = getContactId(botJid);
+  if (text.startsWith(botShort)) return true;
+  return false;
 }
 
 async function handleMessage(sock, msg) {
@@ -62,17 +85,22 @@ async function handleMessage(sock, msg) {
   const jid = getJid(msg);
   const sender = getSender(msg);
   const contactId = getContactId(sender);
+  const botJid = getBotJid(sock);
+  const profile = getProfile(contactId) || {};
 
   trackContact(contactId);
 
   if (isGroup(msg)) {
     const isSpam = await checkAntiSpam(sock, msg, jid, sender);
     if (isSpam) return;
+
+    if (!shouldReplyInGroup(msg, botJid)) {
+      addToMemory(contactId, 'user', text);
+      analyzeMessage(contactId, text, profile);
+      return;
+    }
   }
 
-  const profile = getProfile(contactId) || {};
-
-  // Audio messages - transcribe with Gemini
   if (isAudio(msg)) {
     await handleAudio(sock, msg, contactId, profile);
     return;
@@ -88,9 +116,7 @@ async function handleMessage(sock, msg) {
     return;
   }
 
-  addToMemory(contactId, 'user', text);
-
-  // Trivia check
+  // Juegos, reglas y links se procesan sin guardar en memoria
   if (triviaTimeout(contactId) && text.length < 50) {
     const result = answerTrivia(contactId, text);
     if (result) {
@@ -99,7 +125,6 @@ async function handleMessage(sock, msg) {
     }
   }
 
-  // Custom auto-rules
   const ruleResponse = checkRules(text, contactId);
   if (ruleResponse) {
     await new Promise(r => setTimeout(r, randomDelay()));
@@ -107,7 +132,6 @@ async function handleMessage(sock, msg) {
     return;
   }
 
-  // Link detection
   const urls = extractUrls(text);
   if (urls.length > 0) {
     const linkInfo = await scrapeLink(urls[0]);
@@ -117,29 +141,26 @@ async function handleMessage(sock, msg) {
     }
   }
 
-  // AI natural response
+  addToMemory(contactId, 'user', text);
   await aiReply(sock, msg, text, contactId, profile, false);
 }
 
 async function handleAudio(sock, msg, contactId, profile) {
   const jid = getJid(msg);
   const audioBuffer = await downloadMedia(sock, msg);
-  if (!audioBuffer) {
-    await sock.sendMessage(jid, { text: 'No pude procesar el audio' }, { quoted: msg });
-    return;
-  }
+  if (!audioBuffer) return;
 
   try {
-    // Send audio to Gemini for transcription + response
     const { GoogleGenerativeAI } = require('@google/generative-ai');
     const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || 'AIzaSyDIE6VHUg6AT1XPsq2Wfn7oqbqkG4ksPc8');
     const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash-lite' });
 
-    const systemPrompt = getSystemPrompt(profile);
+    const opts = { isOwner: contactId === '573507927769', isGroup: isGroup(msg) };
+    const systemPrompt = getSystemPrompt(profile, opts);
     const context = getContext(contactId, 4);
 
     const result = await model.generateContent([
-      { text: `${systemPrompt}\n\n${context ? 'Historial:\n' + context + '\n\n' : ''}Este es un mensaje de voz. Escúchalo y responde como lo harías naturalmente en WhatsApp, como si fuera una conversación normal. No digas "escuché tu audio" a menos que sea natural. Responde directo al contenido del audio.` },
+      { text: `${systemPrompt}\n\n${context ? 'Historial:\n' + context + '\n\n' : ''}Te enviaron un audio. Escúchalo y responde de forma natural, como si fuera una conversación normal de WhatsApp. Responde directo al contenido sin mencionar que es un audio a menos que sea necesario.` },
       {
         inlineData: {
           mimeType: 'audio/ogg; codecs=opus',
@@ -151,19 +172,18 @@ async function handleAudio(sock, msg, contactId, profile) {
     let response = result.response.text().substring(0, 400);
     addToMemory(contactId, 'bot', response);
 
-    const delay = randomDelay();
-    await new Promise(r => setTimeout(r, delay));
+    await new Promise(r => setTimeout(r, randomDelay()));
     await sock.sendMessage(jid, { text: response }, { quoted: msg });
   } catch (err) {
-    console.error('Error procesando audio:', err.message);
-    await sock.sendMessage(jid, { text: 'No entendí bien el audio, ¿puedes escribirme?' }, { quoted: msg });
+    console.error('Error audio:', err.message);
   }
 }
 
 async function aiReply(sock, msg, body, contactId, profile, isCommand = false) {
   const jid = getJid(msg);
-  const context = getContext(contactId, 6);
-  const systemPrompt = getSystemPrompt(profile);
+  const context = getContext(contactId, 4);
+  const opts = { isOwner: contactId === '573507927769', isGroup: isGroup(msg) };
+  const systemPrompt = getSystemPrompt(profile, opts);
 
   let prompt = `${systemPrompt}\n\n`;
   if (context) prompt += `Historial reciente:\n${context}\n\n`;
@@ -173,8 +193,7 @@ async function aiReply(sock, msg, body, contactId, profile, isCommand = false) {
 
   if (aiResponse) {
     addToMemory(contactId, 'bot', aiResponse);
-    const delay = isCommand ? 500 : randomDelay();
-    await new Promise(r => setTimeout(r, delay));
+    await new Promise(r => setTimeout(r, isCommand ? 500 : randomDelay()));
     await sock.sendMessage(jid, { text: aiResponse }, { quoted: msg });
     return;
   }
@@ -203,8 +222,7 @@ async function naturalFallback(sock, msg, body, contactId, profile) {
     'Mmm no sé, qué piensas tú?',
   ];
 
-  const delay = 1500 + Math.random() * 2000;
-  await new Promise(r => setTimeout(r, delay));
+  await new Promise(r => setTimeout(r, 1500 + Math.random() * 2000));
   await sock.sendMessage(jid, { text: replies[Math.floor(Math.random() * replies.length)] }, { quoted: msg });
 }
 
@@ -218,7 +236,7 @@ async function handleGroupNotification(sock, notification) {
 async function restoreDeletedMessage(sock, key) {
   try {
     const chatId = key.remoteJid;
-    if (!chatId || chatId === 'status@broadcast') return;
+    if (!chatId || chatId === 'status@broadcast' || !chatId.includes('@g.us')) return;
 
     const msg = await sock.loadMessage(key.id);
     if (!msg) return;
