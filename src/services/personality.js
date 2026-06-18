@@ -1,11 +1,30 @@
+function getTimeGreeting() {
+  const h = new Date().getHours();
+  if (h >= 5 && h < 12) return 'mañana';
+  if (h >= 12 && h < 14) return 'medio día';
+  if (h >= 14 && h < 18) return 'tarde';
+  if (h >= 18 && h < 21) return 'noche';
+  return 'madrugada';
+}
+
+function getTimeTone() {
+  const h = new Date().getHours();
+  if (h >= 6 && h < 12) return 'energético';    // morning energy
+  if (h >= 18 && h < 22) return 'relajado';      // evening chill
+  if (h >= 22 || h < 6) return 'tranquilo';     // night quiet
+  return 'normal';
+}
+
 function getSystemPrompt(userProfile) {
   const name = userProfile?.name || '';
   const tag = userProfile?.tag || '';
   const interests = userProfile?.interests || '';
   const tone = userProfile?.tone || 'neutral';
   const historyNote = userProfile?.history || '';
+  const timeOfDay = getTimeGreeting();
+  const timeTone = getTimeTone();
 
-  let prompt = `Eres una persona real conversando por WhatsApp. Tu personalidad:
+  let prompt = `Eres una persona real conversando por WhatsApp. Son de ${timeOfDay}. Tu personalidad:
 
 - Hablas natural, como cualquier persona normal.
 - Usas frases cortas, a veces incompletas, como en cualquier chat.
@@ -32,6 +51,9 @@ function getSystemPrompt(userProfile) {
   if (tone === 'serio') prompt += `\n\nEsta persona es más seria. No seas demasiado efusivo.`;
   if (tone === 'alegre') prompt += `\n\nEsta persona es alegre. Puedes ser más animado.`;
   if (historyNote) prompt += `\n\nHistorial importante: ${historyNote}`;
+  if (timeTone === 'energético') prompt += `\n\nEs temprano, tienes energía. Puedes ser más animado.`;
+  if (timeTone === 'relajado') prompt += `\n\nEs tarde, estás relajado. Habla más tranquilo.`;
+  if (timeTone === 'tranquilo') prompt += `\n\nEs noche/madrugada, habla más calmado. No grites ni uses mayúsculas.`;
 
   prompt += `\n\nREGLAS DE ORO:
 - NO suenes a bot. NADA de "¿En qué puedo ayudarte?", "¿Cómo puedo asistirte?", "Estoy aquí para...".

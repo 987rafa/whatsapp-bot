@@ -30,7 +30,7 @@ register('ping', async (sock, msg) => {
 register('help', async (sock, msg) => {
   const isGroup = getJid(msg).includes('@g.us');
   let text = '🤖 *COMANDOS*\n\n';
-  text += '▸ !ping | !say\n▸ !perfil | !tag | !nota | !contactos\n▸ !dato | !frase | !chiste | !consejo\n▸ !cumplido | !hora | !fecha\n▸ !8ball <preg> | !moneda | !dado <caras>\n▸ !trivia | !clima <ciudad>\n▸ !calc <expr>\n▸ !reset\n';
+  text += '▸ !ping | !say\n▸ !perfil | !tag | !nota | !contactos\n▸ !dato | !frase | !chiste | !consejo\n▸ !cumplido | !hora | !fecha\n▸ !8ball <preg> | !moneda | !dado <caras>\n▸ !trivia | !clima <ciudad> | !traduce <texto>\n▸ !calc <expr>\n▸ !recuerdame <texto> | !recordatorios\n▸ !dibuja <descripción>\n▸ !reset\n';
   if (isGroup) text += '\n▸ !welcome | !antispam | !admin\n';
   text += '\n▸ !schedule add/list/remove';
 
@@ -176,6 +176,69 @@ register('reset', async (sock, msg) => {
   clearMemory(cid);
   clearChat(cid);
   await sock.sendMessage(getJid(msg), { text: 'Listo, empecemos de nuevo 👋' }, { quoted: msg });
+});
+
+register('traduce', async (sock, msg, args) => {
+  const text = args.join(' ');
+  if (!text) return sock.sendMessage(getJid(msg), { text: 'Uso: !traduce <texto>\nEj: !traduce Hello, how are you?' }, { quoted: msg });
+  const { askGemini } = require('../services/ai');
+  const resp = await askGemini('_translate', `Traduce al español de forma natural (solo la traducción, nada más): "${text}"`);
+  await sock.sendMessage(getJid(msg), { text: resp || 'No pude traducirlo.' }, { quoted: msg });
+});
+
+register('dibuja', async (sock, msg, args) => {
+  const desc = args.join(' ');
+  if (!desc) return sock.sendMessage(getJid(msg), { text: 'Uso: !dibuja <descripción>\nEj: !dibuja un perro en la playa' }, { quoted: msg });
+  const { GoogleGenerativeAI } = require('@google/generative-ai');
+  try {
+    const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || 'AIzaSyDIE6VHUg6AT1XPsq2Wfn7oqbqkG4ksPc8');
+    const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash-exp-image-generation' });
+    const result = await model.generateContent(`Crea una imagen de: ${desc}. Estilo realista.`);
+    const response = result.response;
+    const imageData = response.candidates?.[0]?.content?.parts?.find(p => p.inlineData)?.inlineData;
+    if (imageData) {
+      const { MessageMedia } = require('@whiskeysockets/baileys');
+      const media = new MessageMedia(imageData.mimeType, imageData.data, 'imagen.png');
+      await sock.sendMessage(getJid(msg), { image: Buffer.from(imageData.data, 'base64'), caption: `🎨 ${desc}` });
+    } else {
+      await sock.sendMessage(getJid(msg), { text: 'No pude generar esa imagen.' }, { quoted: msg });
+    }
+  } catch (err) {
+    console.error('Error dibujando:', err.message);
+    await sock.sendMessage(getJid(msg), { text: 'Error generando imagen.' }, { quoted: msg });
+  }
+});
+
+register('recuerdame', async (sock, msg, args) => {
+  const text = args.join(' ');
+  if (!text) return sock.sendMessage(getJid(msg), { text: 'Uso: !recuerdame <mensaje>\nEj: !recuerdame comprar pan' }, { quoted: msg });
+  const { addReminder } = require('../services/database');
+  const jid = getJid(msg);
+  const cid = getContactId(msg);
+
+  // Parse time: default 10 min
+  let timeMatch = text.match(/(?:en\s+)?(\d+)\s*(min|minuto|minutos|h|hora|horas|seg|segundo|segundos)/i);
+  let remindAt;
+  if (timeMatch) {
+    const num = parseInt(timeMatch[1]);
+    const unit = timeMatch[2].toLowerCase();
+    const ms = unit.startsWith('h') ? num * 3600000 : unit.startsWith('s') ? num * 1000 : num * 60000;
+    remindAt = new Date(Date.now() + ms).toISOString().replace('T', ' ').substring(0, 19);
+  } else {
+    remindAt = new Date(Date.now() + 600000).toISOString().replace('T', ' ').substring(0, 19);
+  }
+
+  addReminder(cid, jid, text, remindAt);
+  await sock.sendMessage(jid, { text: `✅ Te recordaré: "${text}"` }, { quoted: msg });
+});
+
+register('recordatorios', async (sock, msg) => {
+  const { getUserReminders } = require('../services/database');
+  const reminders = getUserReminders(getContactId(msg));
+  if (!reminders.length) return sock.sendMessage(getJid(msg), { text: 'Sin recordatorios pendientes.' }, { quoted: msg });
+  let t = '⏰ *Recordatorios*\n\n';
+  for (const r of reminders) t += `#${r.id} "${r.message}" — ${r.remind_at}\n`;
+  await sock.sendMessage(getJid(msg), { text: t }, { quoted: msg });
 });
 
 register('schedule', async (sock, msg, args) => {

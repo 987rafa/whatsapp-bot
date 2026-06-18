@@ -38,6 +38,16 @@ db.exec(`
     enabled INTEGER DEFAULT 1,
     created_at TEXT DEFAULT (datetime('now'))
   );
+
+  CREATE TABLE IF NOT EXISTS reminders (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id TEXT NOT NULL,
+    chat_id TEXT NOT NULL,
+    message TEXT NOT NULL,
+    remind_at TEXT NOT NULL,
+    created_at TEXT DEFAULT (datetime('now')),
+    sent INTEGER DEFAULT 0
+  );
 `);
 
 const stmts = {
@@ -72,6 +82,11 @@ const stmts = {
   `),
   getScheduledMessages: db.prepare('SELECT * FROM scheduled_messages WHERE enabled = 1'),
   deleteScheduledMessage: db.prepare('DELETE FROM scheduled_messages WHERE id = ?'),
+  addReminder: db.prepare('INSERT INTO reminders (user_id, chat_id, message, remind_at) VALUES (?, ?, ?, ?)'),
+  getPendingReminders: db.prepare("SELECT * FROM reminders WHERE sent = 0 AND remind_at <= datetime('now')"),
+  markReminderSent: db.prepare('UPDATE reminders SET sent = 1 WHERE id = ?'),
+  getUserReminders: db.prepare("SELECT * FROM reminders WHERE user_id = ? AND sent = 0 ORDER BY remind_at"),
+  deleteReminder: db.prepare('DELETE FROM reminders WHERE id = ?'),
 };
 
 function trackContact(id) {
@@ -147,9 +162,31 @@ function deleteScheduledMessage(id) {
   stmts.deleteScheduledMessage.run(id);
 }
 
+function addReminder(userId, chatId, message, remindAt) {
+  return stmts.addReminder.run(userId, chatId, message, remindAt);
+}
+
+function getPendingReminders() {
+  return stmts.getPendingReminders.all();
+}
+
+function markReminderSent(id) {
+  stmts.markReminderSent.run(id);
+}
+
+function getUserReminders(userId) {
+  return stmts.getUserReminders.all(userId);
+}
+
+function deleteReminder(id) {
+  stmts.deleteReminder.run(id);
+}
+
 module.exports = {
   db, trackContact, getContact, getContactsByTag, getAllContacts,
   tagContact, updateContactName, updateContactNotes,
   getGroupConfig, updateGroupConfig,
   addScheduledMessage, getScheduledMessages, deleteScheduledMessage,
+  addReminder, getPendingReminders, markReminderSent, getUserReminders, deleteReminder,
+  DB_PATH,
 };

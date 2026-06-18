@@ -2,6 +2,8 @@ const http = require('http');
 const { makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion } = require('@whiskeysockets/baileys');
 const { handleMessage, handleGroupNotification } = require('./services/messages');
 const { startScheduler } = require('./services/scheduler');
+const { startReminderChecker } = require('./services/reminders');
+const { startBackupScheduler } = require('./services/backup');
 const pino = require('pino');
 
 let pairingCode = null;
@@ -127,6 +129,8 @@ async function start() {
       statusMessage = `Conectado como ${user}`;
       console.log(`✅ Bot conectado como ${user}`);
       startScheduler(sock);
+      startReminderChecker(sock);
+      startBackupScheduler();
     }
 
     if (connection === 'close') {
